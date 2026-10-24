@@ -7,9 +7,12 @@ import (
 	"os"
 	"runtime"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/ebitengine/purego"
 )
 
 // The WebView2/COM backend runs on one OS thread, so the GUI scenarios run in
@@ -55,6 +58,7 @@ func TestMain(m *testing.M) {
 		resWinEmbed.Store(winEmbedScenario())
 		resWinDialogCfg.Store(winDialogConfigScenario())
 		resNoBridge.Store(noBridgeScenario())
+		resHidden.Store(hiddenScenario())
 		resWinOnClose.Store(winOnCloseScenario())
 		resWinScheme.Store(winSchemeScenario())
 		resWinClose.Store(winCloseViaUIScenario()) // last: it ends with WM_QUIT
@@ -405,4 +409,15 @@ func TestRichBindingTypes(t *testing.T) {
 	if got != want {
 		t.Fatalf("rich types = %q, want %q", got, want)
 	}
+}
+
+var isWindowVisible func(hwnd uintptr) bool
+
+// windowShown reports whether the window is shown at all (WS_VISIBLE).
+func windowShown(w WebView) bool {
+	if isWindowVisible == nil {
+		user32 := syscall.NewLazyDLL("user32.dll")
+		purego.RegisterFunc(&isWindowVisible, user32.NewProc("IsWindowVisible").Addr())
+	}
+	return isWindowVisible(uintptr(w.Window()))
 }

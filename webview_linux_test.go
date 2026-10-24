@@ -55,6 +55,7 @@ func TestMain(m *testing.M) {
 		resEmbed.Store(embedScenario())
 		resDialogCfg.Store(dialogConfigScenario())
 		resNoBridge.Store(noBridgeScenario())
+		resHidden.Store(hiddenScenario())
 		resHideUntilLoaded.Store(hideUntilLoadedScenario())
 		resRevealTiming.Store(revealTimingScenario())
 		resSpinner.Store(spinnerScenario())
@@ -454,4 +455,12 @@ func navGesturesOn(w *webview) bool {
 	var get func(settings uintptr) bool
 	purego.RegisterLibFunc(&get, webkitLib, "webkit_settings_get_enable_back_forward_navigation_gestures")
 	return get(webkitWebViewGetSettings(w.webview))
+}
+
+// windowShown reports whether the top-level window is shown at all.
+func windowShown(w WebView) bool {
+	if gtkWidgetGetVisible == nil {
+		purego.RegisterLibFunc(&gtkWidgetGetVisible, gtkLib, "gtk_widget_get_visible")
+	}
+	return gtkWidgetGetVisible(uintptr(w.Window()))
 }

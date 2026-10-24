@@ -1,6 +1,9 @@
 package glaze
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 // This file adds a custom-URL-scheme handler API to glaze so a host app can serve
 // its assets from a portless, custom origin (e.g. "app://") that WebKit/WebView2
@@ -195,6 +198,44 @@ type Options struct {
 	// leaves nothing behind. Each ephemeral web view gets its own store.
 	// macOS and Linux; ignored on Windows.
 	Ephemeral bool
+
+	// Hidden makes a headless web view: it keeps its native window and event
+	// loop, but the window is never shown -- not at creation, while loading,
+	// on SetSize, or in Run -- and the app is not activated for it. Focus and
+	// Raise do nothing. SetSize still sizes the page's viewport. Content
+	// loads and runs normally, so HideUntilLoaded is ignored. It cannot be
+	// combined with Window: an existing window's visibility belongs to its
+	// owner. On macOS a process whose only web views are hidden runs without
+	// a Dock icon; with DisableThrottling as well, the window is put on
+	// screen fully transparent and click-through instead of left off it,
+	// since WebKit throttles a page whose window is off screen regardless. Linux still needs a display session (X11 or Wayland; Xvfb
+	// will do).
+	Hidden bool
+
+	// DisableThrottling keeps the page running at full speed while the
+	// window is inactive, covered or hidden: on macOS it opts the process out
+	// of App Nap (for the rest of its life, once any web view asks) and turns
+	// off WebKit's occlusion detection, hidden-page timer throttling and
+	// hidden-page process suppression. For pages doing continuous work in the
+	// background; it costs battery. The WebKit settings are private API,
+	// each applied only if this macOS has it. macOS only; ignored elsewhere.
+	DisableThrottling bool
+}
+
+// ErrHiddenWindow is returned by NewWithOptions when Options.Hidden is
+// combined with Options.Window.
+var ErrHiddenWindow = errors.New("webview: Options.Hidden cannot be combined with Options.Window")
+
+// checkHidden validates Options.Hidden and clears what it overrides.
+func checkHidden(opts *Options) error {
+	if !opts.Hidden {
+		return nil
+	}
+	if opts.Window != nil {
+		return ErrHiddenWindow
+	}
+	opts.HideUntilLoaded = false
+	return nil
 }
 
 // schemeMIME returns a response's MIME type or the octet-stream default.

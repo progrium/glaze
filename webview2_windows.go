@@ -807,6 +807,9 @@ func (w *webview) embed(debug bool) error {
 
 	w.resizeWebView()
 	asController(w.controller).PutIsVisible(true)
+	if w.hidden {
+		return nil
+	}
 	showWindow(w.window, swShow)
 	updateWindow(w.window)
 	// Pull keyboard focus into the content now that the controller exists. The
@@ -827,14 +830,14 @@ func (w *webview) resizeWebView() {
 }
 
 func (w *webview) Focus() {
-	if w.controller == 0 {
+	if w.hidden || w.controller == 0 {
 		return
 	}
 	asController(w.controller).MoveFocus(moveFocusReasonProgrammatic)
 }
 
 func (w *webview) Raise() {
-	if w.window == 0 {
+	if w.hidden || w.window == 0 {
 		return
 	}
 	// Restore first: a minimised window cannot come to the foreground, and

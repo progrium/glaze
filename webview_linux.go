@@ -626,6 +626,8 @@ type webview struct {
 	manager    uintptr
 	ownsWindow bool
 	noBridge   bool
+	// hidden: see Options.Hidden.
+	hidden bool
 	// contentHidden is true while HideUntilLoaded holds the web view back.
 	contentHidden bool
 	// overlay holds the web view and, while it is held back, spinner.
@@ -663,9 +665,10 @@ type webview struct {
 	findText      string
 	findDone      func(bool)
 
-	stopRunLoop   bool
-	isWindowShown bool
-	isSizeSet     bool
+	stopRunLoop bool
+	// isAttached is true once the web view is in its window (windowShow).
+	isAttached bool
+	isSizeSet  bool
 
 	mu             sync.Mutex
 	bindings       map[string]func(id, req string) (any, error)
@@ -876,6 +879,9 @@ func NewWindow(debug bool, window unsafe.Pointer) (WebView, error) {
 // NewWithOptions creates a web view configured by opts, including any custom
 // SchemeHandlers (registered on the web view's context and marked as secure).
 func NewWithOptions(opts Options) (WebView, error) {
+	if err := checkHidden(&opts); err != nil {
+		return nil, err
+	}
 	err := ensureInit()
 	if err != nil {
 		return nil, err
@@ -890,6 +896,7 @@ func NewWithOptions(opts Options) (WebView, error) {
 		bindings:          map[string]func(id, req string) (any, error){},
 		schemeHandlers:    opts.SchemeHandlers,
 		noBridge:          opts.NoBridge,
+		hidden:            opts.Hidden,
 		contentHidden:     opts.HideUntilLoaded,
 		onNavigation:      opts.OnNavigation,
 		onNavigationStart: opts.OnNavigationStart,
@@ -1178,10 +1185,27 @@ func (w *webview) Eval(js string) {
 	}
 }
 
+// windowShow attaches the web view to its window and, unless hidden, presents
+// the window.
 func (w *webview) windowShow() {
-	if w.isWindowShown {
+	if w.isAttached {
 		return
 	}
+	w.attachContent()
+	if w.ownsWindow && !w.hidden {
+		gtkWidgetGrabFocus(w.webview)
+		if gtk4 {
+			gtkWidgetSetVisible(w.window, true)
+		} else {
+			gtkWidgetShow(w.window)
+		}
+	}
+	w.isAttached = true
+}
+
+// attachContent puts the web view (or the loading overlay holding it) in the
+// window, without showing the window.
+func (w *webview) attachContent() {
 	child := w.webview
 	if w.contentHidden {
 		child = w.newLoadingOverlay()
@@ -1195,19 +1219,10 @@ func (w *webview) windowShow() {
 			gtkWidgetShow(w.webview)
 		}
 	}
-	if w.ownsWindow {
-		gtkWidgetGrabFocus(w.webview)
-		if gtk4 {
-			gtkWidgetSetVisible(w.window, true)
-		} else {
-			gtkWidgetShow(w.window)
-		}
-	}
-	w.isWindowShown = true
 }
 
 func (w *webview) Focus() {
-	if w.webview == 0 {
+	if w.hidden || w.webview == 0 {
 		return
 	}
 	// GtkWindow remembers its focus widget and restores it on re-activation, so
@@ -1217,7 +1232,7 @@ func (w *webview) Focus() {
 }
 
 func (w *webview) Raise() {
-	if w.window == 0 {
+	if w.hidden || w.window == 0 {
 		return
 	}
 	// gtk_window_present raises the window and asks the window manager for
@@ -1402,7 +1417,7 @@ func (w *webview) revealContent() {
 	w.contentHidden = false
 	w.removeSpinner()
 	callShown(w.onContentShown)
-	if !w.isWindowShown {
+	if !w.isAttached {
 		return // windowShow will show it with the right visibility
 	}
 	if gtk4 {

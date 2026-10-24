@@ -286,7 +286,7 @@ func wndProc(hwnd uintptr, msg uint32, wp, lp uintptr) uintptr {
 		// click); forward it into the WebView2 content so the keyboard and a screen
 		// reader's cursor land in the page, matching the macOS/Linux backends. A
 		// no-op until the controller exists (embed does the initial focus instead).
-		if w.controller != 0 {
+		if w.controller != 0 && !w.hidden {
 			asController(w.controller).MoveFocus(moveFocusReasonProgrammatic)
 		}
 		return 0
@@ -365,7 +365,7 @@ func subclassProc(hwnd uintptr, msg uint32, wp, lp, _, refData uintptr) uintptr 
 	case wmSetFocus:
 		// Forward keyboard focus into the WebView2 content, as the owned-window
 		// path does; the host still sees the message afterward.
-		if w.controller != 0 {
+		if w.controller != 0 && !w.hidden {
 			asController(w.controller).MoveFocus(moveFocusReasonProgrammatic)
 		}
 	case wmGetMinMaxInfo:
@@ -419,7 +419,9 @@ type webview struct {
 	schemeHandlers map[string]SchemeHandler
 
 	noBridge bool
-	onClose  func()
+	// hidden: see Options.Hidden.
+	hidden  bool
+	onClose func()
 
 	// Window size constraints from SetSize(HintMin/HintMax); enforced in
 	// wndProc's WM_GETMINMAXINFO handler.
@@ -462,6 +464,9 @@ func NewWindow(debug bool, window unsafe.Pointer) (WebView, error) {
 // SchemeHandlers (registered with WebView2 as secure custom schemes; see
 // webview2_scheme_windows.go).
 func NewWithOptions(opts Options) (WebView, error) {
+	if err := checkHidden(&opts); err != nil {
+		return nil, err
+	}
 	err := ensureWinInit()
 	if err != nil {
 		return nil, err
@@ -477,6 +482,7 @@ func NewWithOptions(opts Options) (WebView, error) {
 		dispatchMap:    map[uintptr]func(){},
 		schemeHandlers: opts.SchemeHandlers,
 		noBridge:       opts.NoBridge,
+		hidden:         opts.Hidden,
 		onClose:        opts.OnClose,
 	}
 	window := opts.Window
@@ -581,7 +587,7 @@ func (w *webview) SetSize(width, height int, hint Hint) {
 	setWindowLongPtrW(w.window, gwlStyle, style)
 	setWindowPos(w.window, 0, 0, 0, int32(width), int32(height),
 		swpNoZOrder|swpNoActivate|swpNoMove)
-	if w.ownsWindow {
+	if w.ownsWindow && !w.hidden {
 		showWindow(w.window, swShow)
 		updateWindow(w.window)
 	}
