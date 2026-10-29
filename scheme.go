@@ -203,12 +203,14 @@ type Options struct {
 	// loop, but the window is never shown -- not at creation, while loading,
 	// on SetSize, or in Run -- and the app is not activated for it. Focus and
 	// Raise do nothing. SetSize still sizes the page's viewport (on Linux,
-	// only with DisableThrottling; see below). Content
-	// loads and runs normally, so HideUntilLoaded is ignored. It cannot be
-	// combined with Window: an existing window's visibility belongs to its
-	// owner. On macOS a process whose only web views are hidden runs without
-	// a Dock icon. WebKit throttles a page whose window is not on screen, on
-	// macOS and Linux alike; see DisableThrottling. Linux still needs a
+	// only with DisableThrottling; see below). Content loads and runs
+	// normally, so HideUntilLoaded is ignored. It cannot be combined with
+	// Window: an existing window's visibility belongs to its owner. On macOS a
+	// process whose only web views are hidden runs without a Dock icon.
+	// WebKit throttles a page whose window is not on screen, on macOS and
+	// Linux alike; see DisableThrottling. On Windows a hidden page is not
+	// throttled: it reports itself visible and runs at full speed, animation
+	// frames included, with or without DisableThrottling. Linux still needs a
 	// display session (X11 or Wayland; Xvfb or a headless compositor such as
 	// weston --backend=headless will do), and without DisableThrottling a
 	// hidden page there sees a 0x0 viewport, since its window is never mapped.
@@ -239,7 +241,10 @@ type Options struct {
 	// neither matters. Without Hidden it is best effort: a minimized or
 	// covered window keeps its timers, but not animation frames.
 	//
-	// Ignored on Windows.
+	// On Windows only a minimized window is throttled, because its web view is
+	// sized to nothing. With DisableThrottling the web view keeps its last
+	// size instead, so the page keeps running at full speed and reports
+	// itself visible. A Hidden web view is never throttled.
 	DisableThrottling bool
 }
 

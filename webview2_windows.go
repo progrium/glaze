@@ -319,6 +319,13 @@ func (i *iMessageArgs) TryGetWebMessageAsString(out *uintptr) uintptr {
 	return r
 }
 
+func boolToInt32(b bool) int32 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func boolToUintptr(b bool) uintptr {
 	if b {
 		return 1
@@ -806,6 +813,10 @@ func (w *webview) embed(debug bool) error {
 	}
 
 	w.resizeWebView()
+	// Visible even when Hidden: WebView2 judges the page's visibility by this
+	// and by the web view's size, not by whether the window was ever shown, so
+	// a Hidden page runs unthrottled. Passing false would throttle it like a
+	// minimized window.
 	asController(w.controller).PutIsVisible(true)
 	if w.hidden {
 		return nil
@@ -824,9 +835,16 @@ func (w *webview) resizeWebView() {
 		return
 	}
 	var r rect
-	if getClientRect(w.window, &r) != 0 {
-		asController(w.controller).putBounds(r)
+	if getClientRect(w.window, &r) == 0 {
+		return
 	}
+	// A minimized window has an empty client area, and a web view sized to
+	// nothing is hidden and throttled. With DisableThrottling it keeps its last
+	// size instead, so the page keeps running at full speed.
+	if w.noThrottling && (r.Right <= r.Left || r.Bottom <= r.Top) {
+		return
+	}
+	asController(w.controller).putBounds(r)
 }
 
 func (w *webview) Focus() {

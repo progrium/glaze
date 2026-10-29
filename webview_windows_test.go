@@ -59,6 +59,9 @@ func TestMain(m *testing.M) {
 		resWinDialogCfg.Store(winDialogConfigScenario())
 		resNoBridge.Store(noBridgeScenario())
 		resHidden.Store(hiddenScenario())
+		resWinHiddenThrottle.Store(winThrottleScenario(Options{Hidden: true}, false))
+		resWinMinimized.Store(winThrottleScenario(Options{}, true))
+		resWinMinimizedNoThrott.Store(winThrottleScenario(Options{DisableThrottling: true}, true))
 		resWinOnClose.Store(winOnCloseScenario())
 		resWinScheme.Store(winSchemeScenario())
 		resWinClose.Store(winCloseViaUIScenario()) // last: it ends with WM_QUIT
