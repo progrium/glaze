@@ -231,9 +231,10 @@ type Options struct {
 	// requestAnimationFrame. With Hidden, the window is also mapped without
 	// appearing on screen, so the page is visible to WebKit: an offscreen
 	// window on GTK3, which the first such web view in a process therefore
-	// prefers when both stacks are installed, and on GTK4 a fully
+	// prefers when both stacks are installed, and otherwise (GTK4, or
+	// WebKitGTK 2.48.0 to 2.48.3, which crash in an offscreen window) a fully
 	// transparent, undecorated, click-through window that is never presented
-	// or focused. That GTK4 window can still take focus and appear in the
+	// or focused. On GTK4 that window can still take focus and appear in the
 	// task switcher on some desktops; under Xvfb or a headless compositor
 	// neither matters. Without Hidden it is best effort: a minimized or
 	// covered window keeps its timers, but not animation frames.
