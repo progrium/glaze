@@ -202,23 +202,43 @@ type Options struct {
 	// Hidden makes a headless web view: it keeps its native window and event
 	// loop, but the window is never shown -- not at creation, while loading,
 	// on SetSize, or in Run -- and the app is not activated for it. Focus and
-	// Raise do nothing. SetSize still sizes the page's viewport. Content
+	// Raise do nothing. SetSize still sizes the page's viewport (on Linux,
+	// only with DisableThrottling; see below). Content
 	// loads and runs normally, so HideUntilLoaded is ignored. It cannot be
 	// combined with Window: an existing window's visibility belongs to its
 	// owner. On macOS a process whose only web views are hidden runs without
-	// a Dock icon; with DisableThrottling as well, the window is put on
-	// screen fully transparent and click-through instead of left off it,
-	// since WebKit throttles a page whose window is off screen regardless. Linux still needs a display session (X11 or Wayland; Xvfb
-	// will do).
+	// a Dock icon. WebKit throttles a page whose window is not on screen, on
+	// macOS and Linux alike; see DisableThrottling. Linux still needs a
+	// display session (X11 or Wayland; Xvfb or a headless compositor such as
+	// weston --backend=headless will do), and without DisableThrottling a
+	// hidden page there sees a 0x0 viewport, since its window is never mapped.
 	Hidden bool
 
 	// DisableThrottling keeps the page running at full speed while the
-	// window is inactive, covered or hidden: on macOS it opts the process out
-	// of App Nap (for the rest of its life, once any web view asks) and turns
-	// off WebKit's occlusion detection, hidden-page timer throttling and
-	// hidden-page process suppression. For pages doing continuous work in the
-	// background; it costs battery. The WebKit settings are private API,
-	// each applied only if this macOS has it. macOS only; ignored elsewhere.
+	// window is inactive, covered or hidden. For pages doing continuous work
+	// in the background; it costs battery.
+	//
+	// On macOS it opts the process out of App Nap (for the rest of its life,
+	// once any web view asks) and turns off WebKit's occlusion detection,
+	// hidden-page timer throttling and hidden-page process suppression. The
+	// WebKit settings are private API, each applied only if this macOS has
+	// it. With Hidden, the window is put on screen fully transparent and
+	// click-through instead of left off it.
+	//
+	// On Linux it is complete only with Hidden. It turns off WebKitGTK's
+	// hidden-page timer throttling and CSS animation suspension (WebKitGTK
+	// 2.42 or later), which alone keeps timers at full speed but not
+	// requestAnimationFrame. With Hidden, the window is also mapped without
+	// appearing on screen, so the page is visible to WebKit: an offscreen
+	// window on GTK3, which the first such web view in a process therefore
+	// prefers when both stacks are installed, and on GTK4 a fully
+	// transparent, undecorated, click-through window that is never presented
+	// or focused. That GTK4 window can still take focus and appear in the
+	// task switcher on some desktops; under Xvfb or a headless compositor
+	// neither matters. Without Hidden it is best effort: a minimized or
+	// covered window keeps its timers, but not animation frames.
+	//
+	// Ignored on Windows.
 	DisableThrottling bool
 }
 

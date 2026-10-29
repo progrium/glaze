@@ -200,11 +200,51 @@ func openFirst(names ...string) (uintptr, error) {
 	return 0, fmt.Errorf("webview: none of %v could be loaded: %w", names, lastErr)
 }
 
+// errNoWebKit marks a stack whose webkit library is missing: nothing of that
+// stack was loaded, so the other one may still be tried.
+var errNoWebKit = errors.New("webview: WebKitGTK not found")
+
+// loadGTK4Stack loads GTK4 + webkitgtk-6.0, probing webkit first so that
+// libgtk-4 is loaded only when its webkit is present.
+func loadGTK4Stack() (gtk, webkit, jsc uintptr, err error) {
+	webkit, err = openFirst("libwebkitgtk-6.0.so.4")
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("%w: %w", errNoWebKit, err)
+	}
+	gtk4 = true
+	gtk, err = openFirst("libgtk-4.so.1")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	jsc, err = openFirst("libjavascriptcoregtk-6.0.so.1")
+	return gtk, webkit, jsc, err
+}
+
+// loadGTK3Stack loads GTK3 + webkit2gtk-4.1 (or 4.0), probing webkit first so
+// that libgtk-3 is loaded only when its webkit is present.
+func loadGTK3Stack() (gtk, webkit, jsc uintptr, err error) {
+	webkit, err = openFirst("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37")
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("%w: %w", errNoWebKit, err)
+	}
+	gtk, err = openFirst("libgtk-3.so.0")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	jsc, err = openFirst("libjavascriptcoregtk-4.1.so.0", "libjavascriptcoregtk-4.0.so.18")
+	return gtk, webkit, jsc, err
+}
+
 // Init loads the system GTK + WebKitGTK libraries and resolves all symbols.
 // Safe to call multiple times; New calls it.
 func Init() error { return ensureInit() }
 
-func ensureInit() error {
+func ensureInit() error { return ensureInitPreferring(false) }
+
+// ensureInitPreferring is ensureInit with a stack preference that only the
+// first call in the process can act on: preferGTK3 tries GTK3 +
+// webkit2gtk-4.x before GTK4 + webkitgtk-6.0 (see Options.DisableThrottling).
+func ensureInitPreferring(preferGTK3 bool) error {
 	initOnce.Do(func() {
 		glib, err := openFirst("libglib-2.0.so.0")
 		if err != nil {
@@ -223,38 +263,21 @@ func ensureInit() error {
 		// both GTK3 and GTK4 into the same process corrupts the GObject type
 		// system and crashes gtk_init ("cannot register existing type
 		// 'GdkDisplayManager'"). So load libgtk-4 only when webkitgtk-6.0 is
-		// actually present -- otherwise GTK4 never enters the process.
+		// actually present -- otherwise GTK4 never enters the process. The same
+		// holds the other way round when preferGTK3 probes webkit2gtk first: a
+		// failed dlopen leaves nothing loaded.
 		var gtk, webkit, jsc uintptr
-		wk6, werr := openFirst("libwebkitgtk-6.0.so.4")
-		if werr == nil {
-			gtk4 = true
-			webkit = wk6
-			gtk, err = openFirst("libgtk-4.so.1")
-			if err != nil {
-				initErr = err
-				return
-			}
-			jsc, err = openFirst("libjavascriptcoregtk-6.0.so.1")
-			if err != nil {
-				initErr = err
-				return
-			}
-		} else {
-			gtk, err = openFirst("libgtk-3.so.0")
-			if err != nil {
-				initErr = err
-				return
-			}
-			webkit, err = openFirst("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37")
-			if err != nil {
-				initErr = err
-				return
-			}
-			jsc, err = openFirst("libjavascriptcoregtk-4.1.so.0", "libjavascriptcoregtk-4.0.so.18")
-			if err != nil {
-				initErr = err
-				return
-			}
+		first, second := loadGTK4Stack, loadGTK3Stack
+		if preferGTK3 {
+			first, second = loadGTK3Stack, loadGTK4Stack
+		}
+		gtk, webkit, jsc, err = first()
+		if errors.Is(err, errNoWebKit) {
+			gtk, webkit, jsc, err = second()
+		}
+		if err != nil {
+			initErr = err
+			return
 		}
 
 		gtkLib, glibLib, webkitLib = gtk, glib, webkit
@@ -628,6 +651,8 @@ type webview struct {
 	noBridge   bool
 	// hidden: see Options.Hidden.
 	hidden bool
+	// noThrottling: see Options.DisableThrottling.
+	noThrottling bool
 	// contentHidden is true while HideUntilLoaded holds the web view back.
 	contentHidden bool
 	// overlay holds the web view and, while it is held back, spinner.
@@ -882,7 +907,7 @@ func NewWithOptions(opts Options) (WebView, error) {
 	if err := checkHidden(&opts); err != nil {
 		return nil, err
 	}
-	err := ensureInit()
+	err := ensureInitPreferring(opts.Hidden && opts.DisableThrottling)
 	if err != nil {
 		return nil, err
 	}
@@ -897,6 +922,7 @@ func NewWithOptions(opts Options) (WebView, error) {
 		schemeHandlers:    opts.SchemeHandlers,
 		noBridge:          opts.NoBridge,
 		hidden:            opts.Hidden,
+		noThrottling:      opts.DisableThrottling,
 		contentHidden:     opts.HideUntilLoaded,
 		onNavigation:      opts.OnNavigation,
 		onNavigationStart: opts.OnNavigationStart,
@@ -950,7 +976,11 @@ func (w *webview) windowInit(window uintptr) error {
 		if !gtkInit() {
 			return errors.New("webview: gtk_init_check failed (no display?)")
 		}
-		w.window = gtkNewWindow()
+		if w.unthrottledHidden() {
+			w.window = newUnthrottledHiddenWindow()
+		} else {
+			w.window = gtkNewWindow()
+		}
 		gSignalConnectData(w.window, "destroy", windowDestroyFn, w.id, 0, 0)
 	}
 
@@ -1010,6 +1040,9 @@ func (w *webview) windowSettings(debug bool) {
 	w.mediaSettings(settings)
 	if w.navGestures && webkitSettingsSetEnableBackForwardGestures != nil {
 		webkitSettingsSetEnableBackForwardGestures(settings, true)
+	}
+	if w.noThrottling {
+		disableThrottling(settings)
 	}
 	if debug {
 		webkitSettingsSetEnableWriteConsoleToStdout(settings, true)
@@ -1096,6 +1129,12 @@ func (w *webview) SetSize(width, height int, hint Hint) {
 		} else {
 			gtkWindowResize(w.window, width, height)
 		}
+	}
+	if w.unthrottledHidden() {
+		// An offscreen window ignores gtk_window_resize and the default size,
+		// and an undecorated transparent one may be shrunk to its content, so
+		// pin the size outright: it is the page's viewport.
+		gtkWidgetSetSizeRequest(w.window, width, height)
 	}
 	w.isSizeSet = true
 	w.windowShow()
@@ -1185,14 +1224,24 @@ func (w *webview) Eval(js string) {
 	}
 }
 
+// unthrottledHidden reports whether this view is Hidden with
+// DisableThrottling, and so lives in a window that is mapped but never on
+// screen (see throttle_linux.go).
+func (w *webview) unthrottledHidden() bool {
+	return w.hidden && w.noThrottling && w.ownsWindow
+}
+
 // windowShow attaches the web view to its window and, unless hidden, presents
-// the window.
+// the window. A hidden view with DisableThrottling has its window mapped
+// without being presented.
 func (w *webview) windowShow() {
 	if w.isAttached {
 		return
 	}
 	w.attachContent()
-	if w.ownsWindow && !w.hidden {
+	if w.unthrottledHidden() {
+		showUnthrottledHiddenWindow(w.window)
+	} else if w.ownsWindow && !w.hidden {
 		gtkWidgetGrabFocus(w.webview)
 		if gtk4 {
 			gtkWidgetSetVisible(w.window, true)

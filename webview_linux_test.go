@@ -48,6 +48,11 @@ func guiAvailable() bool {
 func TestMain(m *testing.M) {
 	flag.Parse()
 	runtime.LockOSThread()
+	if os.Getenv(throttleChildEnv) != "" {
+		// Before anything else loads GTK: see TestUnthrottledHiddenPrefersGTK3.
+		fmt.Println(unthrottledHiddenScenario())
+		os.Exit(0)
+	}
 	if !testing.Short() && guiAvailable() {
 		resBridge.Store(bridgeScenario())
 		resErrorUnbind.Store(errorUnbindScenario())
@@ -78,6 +83,7 @@ func TestMain(m *testing.M) {
 		resCookies.Store(cookiesScenario())
 		resClipboard.Store(clipboardScenario())
 		resOnClose.Store(onCloseScenario())
+		resUnthrottledHidden.Store(unthrottledHiddenScenario())
 		resPrgname.Store("name=" + cstr(gGetPrgname())) // never "": unset must fail, not skip
 	}
 	os.Exit(m.Run())
